@@ -1,31 +1,10 @@
-# Build stage for Playwright dependencies
-FROM ubuntu:20.04 AS playwright-deps
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-#ENV PLAYWRIGHT_DRIVER_PATH=/opt/
-ARG TARGETARCH
+# O driver do Playwright 1.60.0 foi removido de todos os CDNs da Microsoft, então
+# não dá mais para rodar `playwright install` num build do zero. Em vez disso,
+# reaproveitamos o driver + navegadores que já estão embutidos na imagem publicada
+# atual (que funciona) e recompilamos apenas o binário Go (que traz a UI embutida).
+# Resultado: build não depende de CDN nenhum e o runtime nunca baixa nada.
 
-RUN export PATH=$PATH:/usr/local/go/bin:/root/go/bin \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl wget \
-    # Architektur-Logik für den Go-Download
-    && if [ "$TARGETARCH" = "arm64" ]; then \
-         GO_ARCH="arm64"; \
-       else \
-         GO_ARCH="amd64"; \
-       fi \
-    && wget -q "https://go.dev/dl/go1.26.4.linux-${GO_ARCH}.tar.gz" \
-    && tar -C /usr/local -xzf "go1.26.4.linux-${GO_ARCH}.tar.gz" \
-    && rm "go1.26.4.linux-${GO_ARCH}.tar.gz" \
-    # ... (Rest des ursprünglichen RUN-Befehls: Nodejs, Playwright, etc.)
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && go install github.com/playwright-community/playwright-go/cmd/playwright@v0.6000.0 \
-    && mkdir -p /opt/browsers \
-    && playwright install chromium --with-deps
-
-# Build stage
+# Stage 1: recompila o binário com os arquivos estáticos novos embutidos (go:embed)
 FROM golang:1.26.4-trixie AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -33,12 +12,15 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /usr/bin/google-maps-scraper
 
-# Final stage
+# Stage 2: fonte do driver + navegadores já baixados (imagem atual em produção)
+FROM ghcr.io/igorcaumo/google-maps-scraper:latest AS baked
+
+# Stage final: imagem limpa
 FROM debian:trixie-slim
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-ENV PLAYWRIGHT_DRIVER_PATH=/opt
+# aponta direto para o driver embutido — sem isso o playwright-go tentaria baixar
+ENV PLAYWRIGHT_DRIVER_PATH=/opt/ms-playwright-go/1.60.0
 
-# Install only the necessary dependencies in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libnss3 \
@@ -63,11 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=playwright-deps /opt/browsers /opt/browsers
-COPY --from=playwright-deps /root/.cache/ms-playwright-go /opt/ms-playwright-go
+# driver e navegadores vêm prontos da imagem atual (zero download)
+COPY --from=baked /opt/browsers /opt/browsers
+COPY --from=baked /opt/ms-playwright-go /opt/ms-playwright-go
 
-RUN chmod -R 755 /opt/browsers \
-    && chmod -R 755 /opt/ms-playwright-go
+RUN chmod -R 755 /opt/browsers /opt/ms-playwright-go
 
 COPY --from=builder /usr/bin/google-maps-scraper /usr/bin/
 
