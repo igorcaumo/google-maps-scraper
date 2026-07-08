@@ -1,20 +1,26 @@
 {{range .}}
 <tr>
-    <td>{{.ID}}</td>
+    <td class="job-id" title="{{.ID}}">{{.ID}}</td>
     <td>{{.Name}}</td>
     <td>{{.Date}}</td>
     <td>
-        <span class="status-indicator status-{{.Status}}">{{.Status}}</span>
+        <span class="status-indicator status-{{.Status}}">
+            {{- if eq .Status "ok" -}}concluído
+            {{- else if eq .Status "pending" -}}pendente
+            {{- else if eq .Status "working" -}}processando
+            {{- else if eq .Status "failed" -}}falhou
+            {{- else -}}{{.Status}}{{- end -}}
+        </span>
     </td>
-    <td>
+    <td class="actions">
         {{ if eq .Status "ok" }}
-            <a href="/download?id={{.ID}}" download class="button download-button">Download</a>
+            <a href="/download?id={{.ID}}" download class="button download-button">⬇ Baixar</a>
         {{ end }}
-        <button hx-delete="/delete?id={{.ID}}" 
+        <button hx-delete="/delete?id={{.ID}}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"
-                hx-confirm="Are you sure you want to delete this job?"
-                class="delete-button">Delete</button>
+                hx-confirm="Tem certeza que deseja excluir esta busca?"
+                class="delete-button">✕ Excluir</button>
     </td>
 </tr>
 {{end}}
